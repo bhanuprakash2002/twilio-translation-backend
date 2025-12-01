@@ -1,0 +1,41 @@
+{
+  "name": "twilio-bidirectional-translation-v2",
+  "version": "3.0.0",
+  "description": "2-device bidirectional real-time translation with Twilio Voice SDK v2",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "twilio",
+    "voice",
+    "sdk-v2",
+    "translation",
+    "bidirectional",
+    "websocket",
+    "google-cloud"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@google-cloud/speech": "^6.0.0",
+    "@google-cloud/text-to-speech": "^5.0.0",
+    "@google-cloud/translate": "^8.0.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "twilio": "^4.19.0",
+    "uuid": "^9.0.1",
+    "wav": "^1.0.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}
