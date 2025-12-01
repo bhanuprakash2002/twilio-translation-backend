@@ -1,5 +1,22 @@
-process.env.GOOGLE_APPLICATION_CREDENTIALS =
-  "C:/Users/bhanu/Desktop/twilio-translation/google-credentials.json";
+
+const fs = require("fs");
+const GC_PATH = "/tmp/google-credentials.json";
+
+// If GOOGLE_CREDENTIALS_JSON exists in Render env,
+// write it into a file so Google SDK can read it.
+if (process.env.GOOGLE_CREDENTIALS_JSON) {
+  try {
+    fs.writeFileSync(GC_PATH, process.env.GOOGLE_CREDENTIALS_JSON);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = GC_PATH;
+    console.log("✅ Google credentials loaded for Render");
+  } catch (err) {
+    console.error("❌ Failed writing Google credentials:", err);
+  }
+}
+
+console.log("🚀 Starting Twilio Voice SDK v2 Translation Server...\n");
+
+require("dotenv").config();
 
 console.log("🚀 Starting Twilio Voice SDK v2 Translation Server...\n");
 
