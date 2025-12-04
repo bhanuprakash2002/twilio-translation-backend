@@ -226,6 +226,43 @@ app.post("/join-room", (req, res) => {
     res.status(500).json({ error: "Failed to join room" });
   }
 });
+
+
+// Leave room
+app.post("/leave-room", (req, res) => {
+  try {
+    const { roomId, userType } = req.body;
+
+    const session = activeSessions.get(roomId);
+    if (!session) {
+      return res.json({ success: true }); // safe fallback
+    }
+
+    console.log(`🚪 User leaving room ${roomId}: ${userType}`);
+
+    if (userType === "caller") {
+      session.creatorConnection = null;
+    } else {
+      session.participantConnection = null;
+      session.participantLanguage = null; // remove participant
+    }
+
+    // Save updated session
+    activeSessions.set(roomId, session);
+
+    // Remove room ONLY if both left
+    if (!session.creatorConnection && !session.participantConnection) {
+      console.log("🧹 Cleaning room:", roomId);
+      activeSessions.delete(roomId);
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("❌ Leave-room error:", error);
+    return res.status(500).json({ error: "Failed to leave room" });
+  }
+});
+
 // Get room info (languages + status)
 app.get("/room-info", (req, res) => {
   const roomId = req.query.roomId;
@@ -402,10 +439,25 @@ wss.on("connection", (ws, req) => {
     }
   });
 
-  ws.on("close", () => {
-    console.log("❌ WebSocket closed");
-    processor.cleanup();
-  });
+ ws.on("close", () => {
+  console.log("❌ WebSocket closed");
+
+  if (processor.roomId && processor.userType) {
+    const session = activeSessions.get(processor.roomId);
+    if (session) {
+      if (processor.userType === "caller") {
+        session.creatorConnection = null;
+      } else {
+        session.participantConnection = null;
+        session.participantLanguage = null; // 🔥 REMOVE participant completely
+      }
+      activeSessions.set(processor.roomId, session);
+    }
+  }
+
+  processor.cleanup();
+});
+
 
   ws.on("error", (error) => {
     console.error("❌ WebSocket error:", error.message);
