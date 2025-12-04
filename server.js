@@ -439,24 +439,43 @@ wss.on("connection", (ws, req) => {
     }
   });
 
- ws.on("close", () => {
-  console.log("❌ WebSocket closed");
+ws.on("close", () => {
+  console.log("❌ WebSocket closed for", processor.userType);
 
-  if (processor.roomId && processor.userType) {
-    const session = activeSessions.get(processor.roomId);
-    if (session) {
-      if (processor.userType === "caller") {
-        session.creatorConnection = null;
-      } else {
-        session.participantConnection = null;
-        session.participantLanguage = null; // 🔥 REMOVE participant completely
-      }
-      activeSessions.set(processor.roomId, session);
-    }
+  const roomId = processor.roomId;
+  const userType = processor.userType;
+
+  if (!roomId || !userType) {
+    return processor.cleanup();
   }
+
+  const session = activeSessions.get(roomId);
+  if (!session) return processor.cleanup();
+
+  // Determine the other participant
+  const otherSide =
+    userType === "caller"
+      ? session.receiverConnection
+      : session.callerConnection;
+
+  // 🔥 Tell the other side to end call
+  if (otherSide && otherSide.ws && otherSide.ws.readyState === 1) {
+    otherSide.ws.send(
+      JSON.stringify({
+        event: "force-disconnect",
+        reason: "Other participant ended the call",
+      })
+    );
+  }
+
+  // Clean room fully — simple reset
+  activeSessions.delete(roomId);
+
+  console.log("🗑️ Room deleted because one side ended:", roomId);
 
   processor.cleanup();
 });
+
 
 
   ws.on("error", (error) => {
