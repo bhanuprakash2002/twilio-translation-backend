@@ -229,32 +229,43 @@ app.post("/join-room", (req, res) => {
 
 
 // Leave room
+// --- Leave room endpoint (replace existing /leave-room) ---
 app.post("/leave-room", (req, res) => {
   try {
     const { roomId, userType } = req.body;
 
     const session = activeSessions.get(roomId);
     if (!session) {
-      return res.json({ success: true }); // safe fallback
+      // If room not found, behave idempotently
+      return res.json({ success: true });
     }
 
     console.log(`🚪 User leaving room ${roomId}: ${userType}`);
 
+    // If we have an associated processor objects stored (creatorConnection/participantConnection)
+    // they should have a .ws reference to the websocket to send force-disconnect.
+    let otherSide = null;
     if (userType === "caller") {
-      session.creatorConnection = null;
+      otherSide = session.participantConnection;
     } else {
-      session.participantConnection = null;
-      session.participantLanguage = null; // remove participant
+      otherSide = session.creatorConnection;
     }
 
-    // Save updated session
-    activeSessions.set(roomId, session);
-
-    // Remove room ONLY if both left
-    if (!session.creatorConnection && !session.participantConnection) {
-      console.log("🧹 Cleaning room:", roomId);
-      activeSessions.delete(roomId);
+    // If other side present and its websocket is open, instruct it to disconnect
+    try {
+      if (otherSide && otherSide.ws && otherSide.ws.readyState === 1) {
+        otherSide.ws.send(JSON.stringify({
+          event: "force-disconnect",
+          reason: "Other participant left the room"
+        }));
+      }
+    } catch (err) {
+      console.warn("Could not send force-disconnect to other side:", err?.message || err);
     }
+
+    // Immediately delete the room to make join/rejoin safe (frontend will detect 404)
+    activeSessions.delete(roomId);
+    console.log("🧹 Room deleted on leave:", roomId);
 
     return res.json({ success: true });
   } catch (error) {
@@ -262,6 +273,7 @@ app.post("/leave-room", (req, res) => {
     return res.status(500).json({ error: "Failed to leave room" });
   }
 });
+
 
 // Get room info (languages + status)
 app.get("/room-info", (req, res) => {
@@ -439,42 +451,43 @@ wss.on("connection", (ws, req) => {
     }
   });
 
-ws.on("close", () => {
-  console.log("❌ WebSocket closed for", processor.userType);
+  ws.on("close", () => {
+    console.log("❌ WebSocket closed for", processor.userType);
 
-  const roomId = processor.roomId;
-  const userType = processor.userType;
+    const roomId = processor.roomId;
+    const userType = processor.userType;
 
-  if (!roomId || !userType) {
-    return processor.cleanup();
-  }
+    // If missing metadata, still clean the processor
+    if (!roomId || !userType) {
+      processor.cleanup();
+      return;
+    }
 
-  const session = activeSessions.get(roomId);
-  if (!session) return processor.cleanup();
+    const session = activeSessions.get(roomId);
+    if (!session) {
+      processor.cleanup();
+      return;
+    }
 
-  // Determine the other participant
-  const otherSide =
-    userType === "caller"
-      ? session.receiverConnection
-      : session.callerConnection;
+    // Notify other side if connected
+    const otherSide = userType === "caller" ? session.participantConnection : session.creatorConnection;
+    try {
+      if (otherSide && otherSide.ws && otherSide.ws.readyState === 1) {
+        otherSide.ws.send(JSON.stringify({
+          event: "force-disconnect",
+          reason: "Other participant disconnected (ws close)"
+        }));
+      }
+    } catch (err) {
+      console.warn("Failed to notify other side on ws close:", err?.message || err);
+    }
 
-  // 🔥 Tell the other side to end call
-  if (otherSide && otherSide.ws && otherSide.ws.readyState === 1) {
-    otherSide.ws.send(
-      JSON.stringify({
-        event: "force-disconnect",
-        reason: "Other participant ended the call",
-      })
-    );
-  }
+    // Remove the room completely so future joins see a clean state
+    activeSessions.delete(roomId);
+    console.log("🗑️ Room deleted because participant WS closed:", roomId);
 
-  // Clean room fully — simple reset
-  activeSessions.delete(roomId);
-
-  console.log("🗑️ Room deleted because one side ended:", roomId);
-
-  processor.cleanup();
-});
+    processor.cleanup();
+  });
 
 
 
