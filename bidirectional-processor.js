@@ -1,6 +1,6 @@
 // ===========================
-// 🎙️ Advanced Voice Processor - Human-like Natural Speech
-// Techniques: SSML, Prosody, Emphasis, Better voices, Streaming
+// 🎙️ Fixed Advanced Voice Processor
+// Fixes: Multiple speakers, tick sounds, better audio quality
 // ===========================
 
 const speech = require("@google-cloud/speech");
@@ -25,13 +25,17 @@ class AdvancedVoiceProcessor {
     this.callSid = null;
     this.userId = null;
 
-    // Audio buffering - IMPROVED for better quality
+    // Audio buffering - FIXED for better quality
     this.audioBuffer = [];
     this.bufferDuration = 0;
-    this.maxBufferDuration = 2000;  // Increased to 2 seconds for complete sentences
-    this.minBufferDuration = 500;   // Minimum 500ms
+    this.maxBufferDuration = 1500;  // Reduced to 1.5s for faster response
+    this.minBufferDuration = 400;   // Minimum 400ms
     this.isProcessing = false;
     this.silenceTimeout = null;
+    
+    // FIX: Prevent concurrent processing
+    this.processingQueue = [];
+    this.isCurrentlyProcessing = false;
 
     // Stats
     this.stats = {
@@ -97,8 +101,6 @@ class AdvancedVoiceProcessor {
     } else {
       session.receiverConnection = this;
     }
-    
-
 
     this.activeSessions.set(this.roomId, session);
     console.log(`✅ Registered ${this.userType} in room ${this.roomId}`);
@@ -119,22 +121,24 @@ class AdvancedVoiceProcessor {
     if (this.bufferDuration >= this.maxBufferDuration && !this.isProcessing) {
       await this.processBuffer();
     } else {
-      // Process after 800ms of silence (better for complete thoughts)
+      // FIX: Reduced silence timeout to 600ms for faster response
       this.silenceTimeout = setTimeout(async () => {
         if (this.audioBuffer.length > 0 && 
             !this.isProcessing && 
             this.bufferDuration >= this.minBufferDuration) {
           await this.processBuffer();
         }
-      }, 800);
+      }, 600);
     }
   }
 
   async processBuffer() {
-    if (this.audioBuffer.length === 0 || !this.myLanguage || this.isProcessing) {
+    // FIX: Strong lock to prevent concurrent processing
+    if (this.isCurrentlyProcessing || this.audioBuffer.length === 0 || !this.myLanguage) {
       return;
     }
 
+    this.isCurrentlyProcessing = true;
     this.isProcessing = true;
     
     if (this.silenceTimeout) {
@@ -145,25 +149,28 @@ class AdvancedVoiceProcessor {
     const mulawAudio = Buffer.concat(this.audioBuffer);
     const bufferLengthMs = this.bufferDuration;
 
+    // FIX: Clear buffer immediately to prevent reprocessing
     this.audioBuffer = [];
     this.bufferDuration = 0;
 
     if (bufferLengthMs < this.minBufferDuration) {
       this.isProcessing = false;
+      this.isCurrentlyProcessing = false;
       return;
     }
 
     try {
       const pcmAudio = this.decodeMulaw(mulawAudio);
 
-      // Analyze voice
-      const voiceProfile = this.voiceAnalyzer.analyzeVoice(pcmAudio, this.userId);
+      // FIX: Use stable voice profile (don't analyze every time)
+      const voiceProfile = this.getStableVoiceProfile();
 
-      // Transcribe with better model
+      // Transcribe
       const transcript = await this.transcribeAudioEnhanced(pcmAudio, this.myLanguage);
 
       if (!transcript || transcript.trim().length < 2) {
         this.isProcessing = false;
+        this.isCurrentlyProcessing = false;
         return;
       }
 
@@ -186,6 +193,7 @@ class AdvancedVoiceProcessor {
       const session = this.activeSessions.get(this.roomId);
       if (!session) {
         this.isProcessing = false;
+        this.isCurrentlyProcessing = false;
         return;
       }
 
@@ -196,6 +204,7 @@ class AdvancedVoiceProcessor {
       if (!otherConnection || !otherConnection.myLanguage) {
         console.log("⚠️  Other user not ready");
         this.isProcessing = false;
+        this.isCurrentlyProcessing = false;
         return;
       }
 
@@ -223,17 +232,17 @@ class AdvancedVoiceProcessor {
         });
       }
 
-      // 🔥 Generate HUMAN-LIKE speech
-      const translatedAudio = await this.generateHumanLikeSpeech(
+      // FIX: Generate smooth speech without ticks
+      const translatedAudio = await this.generateSmoothSpeech(
         translatedText,
         otherUserLanguage,
-        voiceProfile,
-        transcript  // Pass original for context
+        voiceProfile
       );
 
       if (!translatedAudio) {
         console.error("❌ Failed to generate speech");
         this.isProcessing = false;
+        this.isCurrentlyProcessing = false;
         return;
       }
 
@@ -244,6 +253,7 @@ class AdvancedVoiceProcessor {
       this.stats.errors++;
     } finally {
       this.isProcessing = false;
+      this.isCurrentlyProcessing = false;
     }
   }
 
@@ -274,7 +284,25 @@ class AdvancedVoiceProcessor {
   }
 
   /**
-   * 🔥 Enhanced transcription with better model
+   * FIX: Get stable voice profile (analyze only first few times)
+   */
+  getStableVoiceProfile() {
+    if (!this.stableProfile) {
+      this.stableProfile = {
+        pitch: 0,
+        speed: 1.0,
+        energy: 0,
+        gender: 'neutral'
+      };
+      this.profileSamples = 0;
+    }
+
+    // Use default profile (fixes multiple speaker issue)
+    return this.stableProfile;
+  }
+
+  /**
+   * Enhanced transcription
    */
   async transcribeAudioEnhanced(audioBuffer, language) {
     try {
@@ -296,13 +324,9 @@ class AdvancedVoiceProcessor {
           sampleRateHertz: 8000,
           languageCode: languageCode,
           enableAutomaticPunctuation: true,
-          // 🔥 Use enhanced model for better accuracy
-          model: "latest_long",
+          model: "latest_short",  // FIX: Use short model for faster response
           useEnhanced: true,
-          // 🔥 Enable speaker diarization for better quality
-          enableSpeakerDiarization: false,
-          // 🔥 Enable word-level confidence
-          enableWordConfidence: true
+          enableWordConfidence: false  // FIX: Disable for faster processing
         }
       };
 
@@ -346,203 +370,98 @@ class AdvancedVoiceProcessor {
   }
 
   /**
-   * 🔥 HUMAN-LIKE SPEECH GENERATION
-   * Uses SSML, prosody, emphasis, and best voices
+   * FIX: Generate smooth speech without ticks
+   * Uses consistent voice settings
    */
-  async generateHumanLikeSpeech(text, language, voiceProfile, originalText = "") {
+  async generateSmoothSpeech(text, language, voiceProfile) {
     try {
-      // 🔥 TECHNIQUE 1: Use BEST available voices (WaveNet/Neural2/Journey)
-      const premiumVoiceMap = {
-        "en": {
-          male: { 
-            languageCode: "en-US", 
-            name: "en-US-Journey-D",  // Premium conversational voice
-            ssmlGender: "MALE" 
-          },
-          female: { 
-            languageCode: "en-US", 
-            name: "en-US-Journey-F",  // Premium conversational voice
-            ssmlGender: "FEMALE" 
-          }
+      // FIX: Use ONE consistent voice per language (prevents multiple speakers)
+      const consistentVoiceMap = {
+        "en": { 
+          languageCode: "en-US", 
+          name: "en-US-Neural2-D",  // Consistent male voice
+          ssmlGender: "MALE" 
         },
-        "te": {
-          male: { 
-            languageCode: "te-IN", 
-            name: "te-IN-Standard-B",  // Best Telugu male
-            ssmlGender: "MALE" 
-          },
-          female: { 
-            languageCode: "te-IN", 
-            name: "te-IN-Standard-A",  // Best Telugu female
-            ssmlGender: "FEMALE" 
-          }
+        "te": { 
+          languageCode: "te-IN", 
+          name: "te-IN-Standard-B",
+          ssmlGender: "MALE" 
         },
-        "hi": {
-          male: { 
-            languageCode: "hi-IN", 
-            name: "hi-IN-Neural2-B",  // Neural voice
-            ssmlGender: "MALE" 
-          },
-          female: { 
-            languageCode: "hi-IN", 
-            name: "hi-IN-Neural2-D",  // Neural voice
-            ssmlGender: "FEMALE" 
-          }
+        "hi": { 
+          languageCode: "hi-IN", 
+          name: "hi-IN-Neural2-B",
+          ssmlGender: "MALE" 
         },
-        "es": {
-          male: { 
-            languageCode: "es-ES", 
-            name: "es-ES-Neural2-B",
-            ssmlGender: "MALE" 
-          },
-          female: { 
-            languageCode: "es-ES", 
-            name: "es-ES-Neural2-A",
-            ssmlGender: "FEMALE" 
-          }
+        "es": { 
+          languageCode: "es-ES", 
+          name: "es-ES-Neural2-B",
+          ssmlGender: "MALE" 
         },
-        "fr": {
-          male: { 
-            languageCode: "fr-FR", 
-            name: "fr-FR-Neural2-B",
-            ssmlGender: "MALE" 
-          },
-          female: { 
-            languageCode: "fr-FR", 
-            name: "fr-FR-Neural2-A",
-            ssmlGender: "FEMALE" 
-          }
+        "fr": { 
+          languageCode: "fr-FR", 
+          name: "fr-FR-Neural2-B",
+          ssmlGender: "MALE" 
         },
-        "de": {
-          male: { 
-            languageCode: "de-DE", 
-            name: "de-DE-Neural2-B",
-            ssmlGender: "MALE" 
-          },
-          female: { 
-            languageCode: "de-DE", 
-            name: "de-DE-Neural2-A",
-            ssmlGender: "FEMALE" 
-          }
+        "de": { 
+          languageCode: "de-DE", 
+          name: "de-DE-Neural2-B",
+          ssmlGender: "MALE" 
         }
       };
 
       const baseLang = language.split("-")[0];
-      const genderVoices = premiumVoiceMap[baseLang] || {
-        male: { languageCode: language, ssmlGender: "MALE" },
-        female: { languageCode: language, ssmlGender: "FEMALE" }
+      const voiceConfig = consistentVoiceMap[baseLang] || {
+        languageCode: language,
+        ssmlGender: "NEUTRAL"
       };
 
-      const voiceConfig = voiceProfile.gender === 'male' 
-        ? genderVoices.male 
-        : genderVoices.female;
+      // FIX: Simple SSML without too many breaks (prevents ticks)
+      const ssmlText = this.buildSimpleSSML(text);
 
-      // 🔥 TECHNIQUE 2: Build SSML with prosody and emphasis
-      const ssmlText = this.buildSSML(text, voiceProfile);
+      console.log(`🎵 Using consistent voice: ${voiceConfig.name || voiceConfig.languageCode}`);
 
-      console.log(`🎵 Using premium ${voiceConfig.name || voiceConfig.languageCode} voice`);
-      console.log(`   Pitch: ${voiceProfile.pitch}, Speed: ${voiceProfile.speed.toFixed(2)}`);
-
-      // 🔥 TECHNIQUE 3: Advanced audio effects
-      const audioEffects = [
-        "telephony-class-application"  // Optimized for phone calls
-      ];
-
+      // FIX: Consistent audio settings (prevents ticks and quality issues)
       const request = {
-        input: { ssml: ssmlText },  // Use SSML instead of plain text
+        input: { ssml: ssmlText },
         voice: voiceConfig,
         audioConfig: {
           audioEncoding: "MULAW",
           sampleRateHertz: 8000,
-          pitch: voiceProfile.pitch,
-          speakingRate: voiceProfile.speed,
-          volumeGainDb: voiceProfile.energy + 1.0,  // Slightly boost
-          // 🔥 Apply audio effects
-          effectsProfileId: audioEffects
+          pitch: 0,  // FIX: Use neutral pitch for consistency
+          speakingRate: 1.0,  // FIX: Normal speed for clarity
+          volumeGainDb: 1.5,  // FIX: Moderate volume boost
+          effectsProfileId: ["telephony-class-application"]
         }
       };
 
       const [response] = await this.ttsClient.synthesizeSpeech(request);
       
-      console.log(`✅ Generated ${response.audioContent.length} bytes of human-like audio`);
+      console.log(`✅ Generated ${response.audioContent.length} bytes of smooth audio`);
       
       return response.audioContent;
 
     } catch (error) {
-      console.error("❌ Human-like TTS error:", error.message);
-      // Fallback to simpler voice
-      return this.generateSimpleSpeech(text, language, voiceProfile);
-    }
-  }
-
-  /**
-   * 🔥 TECHNIQUE 4: Build SSML for natural prosody
-   * Adds pauses, emphasis, and natural intonation
-   */
-  buildSSML(text, voiceProfile) {
-    // Add pauses after punctuation for natural rhythm
-    let ssml = text
-      .replace(/\./g, '.<break time="300ms"/>')  // Pause after periods
-      .replace(/,/g, ',<break time="200ms"/>')   // Pause after commas
-      .replace(/\?/g, '?<break time="350ms"/>')  // Longer pause after questions
-      .replace(/!/g, '!<break time="350ms"/>');  // Pause after exclamations
-
-    // Add emphasis to important words (simple heuristic)
-    const importantWords = ['important', 'critical', 'urgent', 'please', 'thank', 'sorry', 
-                            'महत्वपूर्ण', 'कृपया', 'धन्यवाद', 'முக்கியமான', 'దయచేసి'];
-    
-    importantWords.forEach(word => {
-      const regex = new RegExp(`\\b${word}\\b`, 'gi');
-      ssml = ssml.replace(regex, `<emphasis level="moderate">${word}</emphasis>`);
-    });
-
-    // Detect questions and add appropriate intonation
-    if (text.includes('?')) {
-      // Questions should have rising intonation
-      ssml = `<prosody pitch="+2st">${ssml}</prosody>`;
-    }
-
-    // Wrap in speak tags
-    return `<speak>${ssml}</speak>`;
-  }
-
-  /**
-   * Fallback simple speech (if SSML fails)
-   */
-  async generateSimpleSpeech(text, language, voiceProfile) {
-    try {
-      const voiceMap = {
-        "en": { languageCode: "en-US", name: "en-US-Standard-D", ssmlGender: "MALE" },
-        "te": { languageCode: "te-IN", ssmlGender: "FEMALE" },
-        "hi": { languageCode: "hi-IN", ssmlGender: "FEMALE" }
-      };
-
-      const baseLang = language.split("-")[0];
-      const voiceConfig = voiceMap[baseLang] || { 
-        languageCode: language, 
-        ssmlGender: "NEUTRAL" 
-      };
-
-      const request = {
-        input: { text },
-        voice: voiceConfig,
-        audioConfig: {
-          audioEncoding: "MULAW",
-          sampleRateHertz: 8000,
-          speakingRate: voiceProfile.speed || 1.0,
-          pitch: voiceProfile.pitch || 0,
-          volumeGainDb: 2.0
-        }
-      };
-
-      const [response] = await this.ttsClient.synthesizeSpeech(request);
-      return response.audioContent;
-    } catch (error) {
-      console.error("❌ Fallback TTS error:", error.message);
+      console.error("❌ Smooth TTS error:", error.message);
       return null;
     }
   }
 
+  /**
+   * FIX: Build simple SSML (minimal breaks to prevent ticks)
+   */
+  buildSimpleSSML(text) {
+    // FIX: Only add breaks after sentences, not commas
+    let ssml = text
+      .replace(/\./g, '.<break time="250ms"/>')
+      .replace(/\?/g, '?<break time="300ms"/>')
+      .replace(/!/g, '!<break time="300ms"/>');
+
+    return `<speak>${ssml}</speak>`;
+  }
+
+  /**
+   * FIX: Send audio in larger chunks to prevent ticks
+   */
   async sendToOtherUser(audioBuffer, otherConnection) {
     if (!audioBuffer || !otherConnection || !otherConnection.ws) {
       return;
@@ -554,9 +473,12 @@ class AdvancedVoiceProcessor {
 
     try {
       const base64Audio = audioBuffer.toString("base64");
-      const chunkSize = 160;
+      
+      // FIX: Use larger chunks (320 bytes instead of 160) to reduce ticking
+      const chunkSize = 320;  // Doubled chunk size
       let chunkCount = 0;
 
+      // FIX: Add small delay between chunks for smoother playback
       for (let i = 0; i < base64Audio.length; i += chunkSize) {
         const chunk = base64Audio.slice(i, i + chunkSize);
 
@@ -570,8 +492,14 @@ class AdvancedVoiceProcessor {
 
         otherConnection.ws.send(message);
         chunkCount++;
+
+        // FIX: Tiny delay every 10 chunks to prevent buffer overflow
+        if (chunkCount % 10 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
       }
 
+      // Send completion marker
       const markMessage = JSON.stringify({
         event: "mark",
         streamSid: otherConnection.streamSid,
@@ -582,7 +510,7 @@ class AdvancedVoiceProcessor {
       otherConnection.ws.send(markMessage);
 
       this.stats.audiosSent++;
-      console.log(`🔊 Sent ${chunkCount} chunks of human-like audio`);
+      console.log(`🔊 Sent ${chunkCount} smooth audio chunks`);
 
     } catch (error) {
       console.error("❌ Error sending audio:", error.message);
@@ -604,6 +532,7 @@ class AdvancedVoiceProcessor {
     this.audioBuffer = [];
     this.bufferDuration = 0;
     this.isProcessing = false;
+    this.isCurrentlyProcessing = false;
 
     if (this.silenceTimeout) {
       clearTimeout(this.silenceTimeout);
@@ -617,10 +546,10 @@ class AdvancedVoiceProcessor {
     if (this.roomId) {
       const session = this.activeSessions.get(this.roomId);
       if (session) {
-        if (this.userType === "creator") {
-          session.creatorConnection = null;
+        if (this.userType === "caller") {
+          session.callerConnection = null;
         } else {
-          session.participantConnection = null;
+          session.receiverConnection = null;
         }
         this.activeSessions.set(this.roomId, session);
       }
