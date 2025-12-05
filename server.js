@@ -162,7 +162,8 @@ app.get("/voice-token", (req, res) => {
 // Create room
 app.post("/create-room", async (req, res) => {
   try {
-    const { creatorLanguage } = req.body;
+    const { creatorLanguage, creatorName } = req.body;
+
     const roomId = uuidv4().substring(0, 8);
 
     activeSessions.set(roomId, {
@@ -170,7 +171,9 @@ app.post("/create-room", async (req, res) => {
       participantLanguage: null,
       creatorConnection: null,
       participantConnection: null,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      creatorName: creatorName,
+
     });
 
     // Build join URL
@@ -196,10 +199,12 @@ app.post("/create-room", async (req, res) => {
 // Join room
 app.post("/join-room", (req, res) => {
   try {
-    const { roomId, participantLanguage } = req.body;
+    const { roomId, participantLanguage, participantName } = req.body;
 
     const session = activeSessions.get(roomId);
     
+    session.participantName = participantName;
+
     if (!session) {
       console.error("❌ Room not found:", roomId);
       return res.status(404).json({ error: "Room not found" });
@@ -285,9 +290,12 @@ app.get("/room-info", (req, res) => {
   }
 
   res.json({
-    creatorLanguage: session.creatorLanguage,
-    participantLanguage: session.participantLanguage
-  });
+  creatorLanguage: session.creatorLanguage,
+  participantLanguage: session.participantLanguage,
+  callerName: session.creatorName || "Caller",
+  receiverName: session.participantName || "Receiver"
+});
+
 });
 
 // =====================================
